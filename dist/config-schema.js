@@ -10,9 +10,14 @@ const headerSchema = zod_1.z.object({
     key: zod_1.z.string(),
     value: zod_1.z.string(),
 });
+const rateLimitSchema = zod_1.z.object({
+    maxRequests: zod_1.z.number().default(5),
+    timeWindow: zod_1.z.number().default(60000), // 1 minute in milliseconds
+});
 const ruleSchema = zod_1.z.object({
     path: zod_1.z.string(),
     upstreams: zod_1.z.array(zod_1.z.string()),
+    rateLimit: rateLimitSchema.optional(),
 });
 const serverSchema = zod_1.z.object({
     listen: zod_1.z.number(),
@@ -23,4 +28,5 @@ const serverSchema = zod_1.z.object({
 });
 exports.rootConfigSchema = zod_1.z.object({
     server: serverSchema,
+    rateLimit: rateLimitSchema.optional(),
 });

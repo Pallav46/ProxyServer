@@ -1,5 +1,6 @@
 import cluster, { Worker } from "cluster";
 import http, { request } from "http";
+import { URL } from "url";
 
 import { ConfigSchemaType, rootConfigSchema } from "./config-schema";
 import {
@@ -7,6 +8,13 @@ import {
   workerMessageSchema,
   workerMessageType,
 } from "./server-schema";
+
+interface ClientInfo {
+  lastRequestTime: number;
+  requestCount: number;
+}
+
+const clientRequestCounts: Map<string, ClientInfo> = new Map();
 
 interface CreateServerConfig {
   port: number;
@@ -16,6 +24,7 @@ interface CreateServerConfig {
 
 export async function createServer(config: CreateServerConfig) {
   const { workerCount, port } = config;
+  const { rateLimit } = config.config;
 
   const WORKER_POOL: Worker[] = [];
 
@@ -27,9 +36,46 @@ export async function createServer(config: CreateServerConfig) {
       console.log(`Master Process: Forking Worker Process: ${i} 🚀`);
     }
 
+    let workerIndex = 0;
+
+    const roundRobin = (): Worker => {
+      const worker: Worker = WORKER_POOL[workerIndex];
+      console.log(`Request forwarded to worker ${workerIndex}`);
+      workerIndex = (workerIndex + 1) % WORKER_POOL.length;
+      return worker;
+    };
+
     const server = http.createServer((req, res) => {
-      const index = Math.floor(Math.random() * WORKER_POOL.length);
-      const worker: Worker = WORKER_POOL[index];
+      const clientIp = req.socket.remoteAddress || "127.0.0.1";
+      const rule = config.config.server.rules.find((e) => e.path === req.url);
+      const pathRateLimit = rule?.rateLimit;
+
+      const now = Date.now();
+      const clientInfo = clientRequestCounts.get(clientIp) || {
+        lastRequestTime: now,
+        requestCount: 0,
+      };
+
+      const activeRateLimit = pathRateLimit || rateLimit;
+
+      if (activeRateLimit) {
+        if (now - clientInfo.lastRequestTime > activeRateLimit.timeWindow) {
+          clientInfo.requestCount = 0;
+        }
+
+        if (clientInfo.requestCount >= activeRateLimit.maxRequests) {
+          console.warn(`Rate limit exceeded for client ${clientIp}`);
+          res.statusCode = 429;
+          res.end("Too Many Requests");
+          return;
+        }
+      }
+
+      clientInfo.lastRequestTime = now;
+      clientInfo.requestCount++;
+      clientRequestCounts.set(clientIp, clientInfo);
+
+      const worker: Worker = roundRobin();
 
       if (!worker.isConnected()) {
         res.statusCode = 503;
@@ -53,8 +99,8 @@ export async function createServer(config: CreateServerConfig) {
           res.end(reply.error);
           return;
         } else {
-            res.statusCode = 200;
-            res.end(reply.data);
+          res.statusCode = 200;
+          res.end(reply.data);
         }
       });
     });
@@ -64,14 +110,45 @@ export async function createServer(config: CreateServerConfig) {
     });
   } else {
     console.log(`Worker Process is Up with PID: ${process.pid} 🎉`);
-    const config = await rootConfigSchema.parseAsync(
-      JSON.parse(process.env.config as string)
-    );
+    let config: ConfigSchemaType;
+    try {
+      config = await rootConfigSchema.parseAsync(
+        JSON.parse(process.env.config as string)
+      );
+    } catch (error) {
+      console.error("Error parsing config:", error);
+      const reply: workerMessageReplyType = {
+        errorCode: "500",
+        error: "Config Parsing Error",
+      };
+      if (process.send) {
+        await process.send(JSON.stringify(reply));
+      } else {
+        console.error("process.send is not defined");
+      }
+      return;
+    }
 
     process.on("message", async (message: string) => {
-      const messagevalidated = await workerMessageSchema.parseAsync(
-        JSON.parse(message)
-      );
+      let messagevalidated;
+
+      try {
+        messagevalidated = await workerMessageSchema.parseAsync(
+          JSON.parse(message)
+        );
+      } catch (error) {
+        console.error("Error parsing message:", error);
+        const reply: workerMessageReplyType = {
+          errorCode: "400",
+          error: "Message Parsing Error",
+        };
+        if (process.send) {
+          await process.send(JSON.stringify(reply));
+        } else {
+          console.error("process.send is not defined");
+        }
+        return;
+      }
       const requestURL = messagevalidated.url;
       const rule = config.server.rules.find((e) => e.path === requestURL);
 
@@ -80,23 +157,45 @@ export async function createServer(config: CreateServerConfig) {
           errorCode: "404",
           error: "Rule Not Found",
         };
-        if (process.send) JSON.stringify(reply);
+        if (process.send) {
+          await process.send(JSON.stringify(reply));
+        } else {
+          console.error("process.send is not defined");
+        }
         return;
       }
 
       const upstreamId = rule?.upstreams[0];
+      if (!upstreamId) {
+        const reply: workerMessageReplyType = {
+          errorCode: "500",
+          error: "Upstream ID Not Found",
+        };
+        if (process.send) {
+          await process.send(JSON.stringify(reply));
+        } else {
+          console.error("process.send is not defined");
+        }
+        return;
+      }
       const upstream = config.server.upstreams.find((e) => e.id === upstreamId);
-      
+
       if (!upstream) {
         const reply: workerMessageReplyType = {
           errorCode: "500",
           error: "Upstream Not Found",
         };
-        if (process.send) JSON.stringify(reply);
+        if (process.send) {
+          await process.send(JSON.stringify(reply));
+        } else {
+          console.error("process.send is not defined");
+        }
         return;
       }
 
       const url = new URL(upstream?.url as string); // Parse the upstream URL
+
+      console.log(`Forwarding request to ${url.href}`);
 
       const request = http.request(
         {
@@ -104,6 +203,7 @@ export async function createServer(config: CreateServerConfig) {
           port: url.port || 80, // Use the port from the URL or default to 80
           path: requestURL, // Forward the request URL
           method: "GET", // HTTP method
+          agent: new http.Agent({ keepAlive: true }),
         },
         (response) => {
           let data = "";

@@ -11,5 +11,5 @@ exports.workerMessageSchema = zod_1.z.object({
 exports.workerMessageReplySchema = zod_1.z.object({
     data: zod_1.z.string().optional(),
     error: zod_1.z.string().optional(),
-    errorCode: zod_1.z.enum(['500', '404']).optional(),
+    errorCode: zod_1.z.enum(['500', '404', '400', '429']).optional(),
 });

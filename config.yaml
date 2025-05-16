@@ -29,3 +29,10 @@ server:
       upstreams:
         - node1
         - node2
+      rateLimit:
+        maxRequests: 3
+        timeWindow: 30000
+
+rateLimit:
+  maxRequests: 5
+  timeWindow: 60000
