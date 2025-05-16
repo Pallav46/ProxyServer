@@ -22,6 +22,7 @@ A lightweight, scalable, and configurable reverse proxy server built with Node.j
 - **Configurable**: All routing, upstreams, and rate limits are defined in a YAML config file.
 - **Load Balancing**: Built-in round-robin load balancing across upstreams.
 - **Rate Limiting**: Per-path and global rate limiting support.
+- **Caching**: Implements a caching mechanism to reduce latency and improve performance by storing frequently accessed responses.
 - **Extensible**: Easily add new rules, upstreams, or headers.
 - **Type-Safe**: Uses Zod for runtime config validation.
 - **Robust Error Handling**: Clear error messages and status codes for all failure scenarios.
@@ -29,7 +30,7 @@ A lightweight, scalable, and configurable reverse proxy server built with Node.j
 ---
 
 ## Architecture
-- **src/server.ts**: Main entry point, handles clustering, rate limiting, and request forwarding.
+- **src/server.ts**: Main entry point, handles clustering, rate limiting, request forwarding, and caching logic.
 - **src/config-schema.ts**: Zod schemas and types for validating configuration.
 - **src/server-schema.ts**: Zod schemas for inter-process communication.
 - **src/config.ts**: Utilities for loading and validating YAML config files.
@@ -105,17 +106,26 @@ server:
       rateLimit:
         maxRequests: 3
         timeWindow: 30000
+      cache:
+        enabled: true
+        ttl: 60000
 rateLimit:
   maxRequests: 5
   timeWindow: 60000
+cache:
+  enabled: true
+  ttl: 60000
 ```
 
 - **server.listen**: Port to listen on
 - **server.workers**: Number of worker processes
 - **server.upstreams**: List of backend servers
 - **server.headers**: Headers to add to all responses
-- **server.rules**: Routing rules (by path, upstreams, and optional rate limit)
+- **server.rules**: Routing rules (by path, upstreams, and optional rate limit and cache)
 - **rateLimit**: Global rate limiting (can be overridden per rule)
+- **cache**: Global cache settings (can be overridden per rule)
+  - **enabled**: Enable or disable caching
+  - **ttl**: Time to live in milliseconds
 
 ---
 
@@ -157,4 +167,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ---
 
 **Maintainer:** Pallav
-
