@@ -311,6 +311,11 @@ export async function createServer(config: CreateServerConfig) {
 
       console.log(`Forwarding request to ${url.href}`);
 
+      const agent = new http.Agent({
+        keepAlive: true,
+        maxSockets: 100, // Maximum number of sockets in the pool
+      });
+
       // Forward request to upstream using Node.js http.request
       const request = http.request(
         {
@@ -318,7 +323,7 @@ export async function createServer(config: CreateServerConfig) {
           port: url.port || 80, // Use the port from the URL or default to 80
           path: requestURL, // Forward the request URL
           method: "GET", // HTTP method (can be extended for other methods)
-          agent: new http.Agent({ keepAlive: true }), // Keep-alive for performance
+          agent: agent, // Use the connection pool
         },
         (response) => {
           let data = "";

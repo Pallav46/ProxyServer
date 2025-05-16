@@ -261,13 +261,17 @@ function createServer(config) {
                 // Parse upstream URL
                 const url = new url_1.URL(upstream === null || upstream === void 0 ? void 0 : upstream.url); // Parse the upstream URL
                 console.log(`Forwarding request to ${url.href}`);
+                const agent = new http_1.default.Agent({
+                    keepAlive: true,
+                    maxSockets: 100, // Maximum number of sockets in the pool
+                });
                 // Forward request to upstream using Node.js http.request
                 const request = http_1.default.request({
                     hostname: url.hostname, // Extract the hostname
                     port: url.port || 80, // Use the port from the URL or default to 80
                     path: requestURL, // Forward the request URL
                     method: "GET", // HTTP method (can be extended for other methods)
-                    agent: new http_1.default.Agent({ keepAlive: true }), // Keep-alive for performance
+                    agent: agent, // Use the connection pool
                 }, (response) => {
                     let data = "";
                     response.on("data", (chunk) => {
