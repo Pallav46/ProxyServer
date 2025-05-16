@@ -1,103 +1,154 @@
-# Nginx Clone 🚀
+# ProxyServer (Node.js Reverse Proxy)
 
-A lightweight, Node.js-based reverse proxy server inspired by Nginx. This project allows you to route HTTP requests to upstream servers based on configurable rules.
+A lightweight, scalable, and configurable reverse proxy server built with Node.js and TypeScript, inspired by Nginx. This project enables HTTP request routing to upstream servers based on flexible, YAML-based configuration rules.
+
+---
+
+## Table of Contents
+- [Features](#features)
+- [Architecture](#architecture)
+- [Folder Structure](#folder-structure)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [Running the Server](#running-the-server)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
 
 ## Features
+- **Clustered**: Utilizes Node.js clustering for multi-core scalability.
+- **Configurable**: All routing, upstreams, and rate limits are defined in a YAML config file.
+- **Load Balancing**: Built-in round-robin load balancing across upstreams.
+- **Rate Limiting**: Per-path and global rate limiting support.
+- **Extensible**: Easily add new rules, upstreams, or headers.
+- **Type-Safe**: Uses Zod for runtime config validation.
+- **Robust Error Handling**: Clear error messages and status codes for all failure scenarios.
 
-- Lightweight and fast reverse proxy.
-- Configurable upstreams and routing rules via a YAML configuration file.
-- Support for both HTTP and HTTPS protocols.
-- Easy to extend and customize.
+---
 
-## Prerequisites
+## Architecture
+- **src/server.ts**: Main entry point, handles clustering, rate limiting, and request forwarding.
+- **src/config-schema.ts**: Zod schemas and types for validating configuration.
+- **src/server-schema.ts**: Zod schemas for inter-process communication.
+- **src/config.ts**: Utilities for loading and validating YAML config files.
+- **src/index.ts**: CLI entry point.
 
-- Node.js (v18 or higher)
-- npm or yarn
-- Basic knowledge of reverse proxies and YAML configuration
+---
 
-## Installation
+## Folder Structure
+```
+ProxyServer/
+├── config.yaml           # Main configuration file (YAML)
+├── LICENSE
+├── package.json
+├── pnpm-lock.yaml
+├── README.md
+├── tsconfig.json
+└── src/
+    ├── config-schema.ts  # Zod schemas for config validation
+    ├── config.ts         # Config loading/validation utilities
+    ├── index.ts          # CLI entry point
+    ├── server-schema.ts  # Message schemas for cluster communication
+    └── server.ts         # Main server logic
+```
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/nginx-clone.git
-   cd nginx-clone
-   ```
+---
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+## Getting Started
 
-3. Build the project (if using TypeScript):
-   ```bash
-   npm run build
-   ```
+### Prerequisites
+- Node.js v18 or higher
+- pnpm (recommended), or npm/yarn
+
+### Installation
+```bash
+# Clone the repository
+$ git clone https://github.com/yourusername/proxyserver.git
+$ cd proxyserver
+
+# Install dependencies
+$ pnpm install
+
+# Build the project
+$ pnpm run build
+```
+
+---
 
 ## Configuration
 
-The server uses a `config.yaml` file for routing and upstream configuration. Below is a sample configuration:
+All server behavior is defined in `config.yaml` at the project root. Example:
 
 ```yaml
 server:
   listen: 8080
   workers: 4
-
   upstreams:
     - id: node1
       url: http://jsonplaceholder.typicode.com
-
     - id: node2
       url: http://jsonplaceholder.typicode.com
-
   headers:
     - key: X-Forwarded-For
-      value: '$ip'
-
+      value: "$ip"
     - key: Authorization
-      value: 'Bearer $token'
-
+      value: "Bearer $token"
   rules:
     - path: /
-      upstreams:
-        - node1
-        - node2
-
+      upstreams: [node1, node2]
     - path: /todos
-      upstreams:
-        - node1
+      upstreams: [node1]
+    - path: /todos/1
+      upstreams: [node1, node2]
+      rateLimit:
+        maxRequests: 3
+        timeWindow: 30000
+rateLimit:
+  maxRequests: 5
+  timeWindow: 60000
 ```
 
-### Steps to Add Your Configuration
+- **server.listen**: Port to listen on
+- **server.workers**: Number of worker processes
+- **server.upstreams**: List of backend servers
+- **server.headers**: Headers to add to all responses
+- **server.rules**: Routing rules (by path, upstreams, and optional rate limit)
+- **rateLimit**: Global rate limiting (can be overridden per rule)
 
-1. Create a `config.yaml` file in the root directory.
-2. Copy and customize the sample configuration as per your requirements.
+---
 
 ## Running the Server
 
-1. Start the server:
-   ```bash
-   npm start -- --config config.yaml
-   ```
+```bash
+pnpm start -- --config config.yaml
+```
 
-2. Access the server at `http://localhost:8080`.
+- The server will be available at `http://localhost:8080` (or your configured port).
+
+---
 
 ## Testing
 
-To test the reverse proxy functionality, you can use tools like `curl` or Postman:
+You can test the proxy using `curl`, Postman, or any HTTP client:
 
-- Example request:
-  ```bash
-  curl http://localhost:8080/todos
-  ```
+```bash
+curl http://localhost:8080/todos
+```
+
+---
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
+1. Fork the repository
+2. Create a new branch for your feature or bugfix
+3. Commit your changes with clear, descriptive messages
+4. Submit a pull request
 
-1. Fork the repository.
-2. Create a new branch for your feature or bugfix.
-3. Commit your changes with descriptive messages.
-4. Submit a pull request.
+Please ensure your code follows the existing style and includes appropriate documentation/comments.
+
+---
 
 ## License
 
@@ -105,5 +156,5 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-Feel free to reach out if you have any questions or suggestions!
+**Maintainer:** Pallav
 

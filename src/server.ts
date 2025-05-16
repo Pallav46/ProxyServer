@@ -1,3 +1,18 @@
+/**
+ * server.ts
+ * -------------
+ * Main entry point for the Proxy Server. Implements a clustered HTTP proxy with rate limiting and rule-based upstream forwarding.
+ *
+ * Design Principles:
+ * - Single Responsibility: Each function and interface has a clear, single purpose.
+ * - DRY: Avoids code duplication, especially in error handling and configuration parsing.
+ * - Robust Error Handling: All error cases are handled with clear messages and status codes.
+ * - Readability: Code is organized, commented, and uses descriptive names.
+ *
+ * Author: Pallav
+ * Date: 2025-05-16
+ */
+
 import cluster, { Worker } from "cluster";
 import http, { request } from "http";
 import { URL } from "url";
@@ -9,19 +24,42 @@ import {
   workerMessageType,
 } from "./server-schema";
 
+/**
+ * Interface for client information for rate limiting.
+ * @interface ClientInfo
+ * @property {number} lastRequestTime - Last request timestamp (ms).
+ * @property {number} requestCount - Number of requests in the current window.
+ */
 interface ClientInfo {
   lastRequestTime: number;
   requestCount: number;
 }
 
+/**
+ * Map to store client request counts for rate limiting.
+ * Keyed by client IP address.
+ */
 const clientRequestCounts: Map<string, ClientInfo> = new Map();
 
+/**
+ * Interface for the createServer config.
+ * @interface CreateServerConfig
+ * @property {number} port - Port to listen on.
+ * @property {number} workerCount - Number of worker processes.
+ * @property {ConfigSchemaType} config - Server configuration object.
+ */
 interface CreateServerConfig {
   port: number;
   workerCount: number;
   config: ConfigSchemaType;
 }
 
+/**
+ * Creates a proxy server with clustering, rate limiting, and rule-based upstream forwarding.
+ *
+ * @param {CreateServerConfig} config - The config for the server.
+ * @returns {Promise<void>} Resolves when the server is started.
+ */
 export async function createServer(config: CreateServerConfig) {
   const { workerCount, port } = config;
   const { rateLimit } = config.config;
@@ -29,7 +67,11 @@ export async function createServer(config: CreateServerConfig) {
   const WORKER_POOL: Worker[] = [];
 
   if (cluster.isPrimary) {
+    /**
+     * Master process logic: forks workers and handles round-robin load balancing.
+     */
     console.log(`Master Process is Up with PID: ${process.pid} 🎉`);
+    // Fork workers.
     for (let i = 0; i < workerCount; i++) {
       const w = cluster.fork({ config: JSON.stringify(config.config) });
       WORKER_POOL.push(w);
@@ -38,6 +80,10 @@ export async function createServer(config: CreateServerConfig) {
 
     let workerIndex = 0;
 
+    /**
+     * Performs round robin load balancing to select the next worker.
+     * @returns {Worker} - The selected worker.
+     */
     const roundRobin = (): Worker => {
       const worker: Worker = WORKER_POOL[workerIndex];
       console.log(`Request forwarded to worker ${workerIndex}`);
@@ -45,6 +91,10 @@ export async function createServer(config: CreateServerConfig) {
       return worker;
     };
 
+    /**
+     * Creates an HTTP server to handle incoming requests.
+     * Handles rate limiting and forwards requests to workers.
+     */
     const server = http.createServer((req, res) => {
       const clientIp = req.socket.remoteAddress || "127.0.0.1";
       const rule = config.config.server.rules.find((e) => e.path === req.url);
@@ -58,6 +108,7 @@ export async function createServer(config: CreateServerConfig) {
 
       const activeRateLimit = pathRateLimit || rateLimit;
 
+      // Rate limiting logic
       if (activeRateLimit) {
         if (now - clientInfo.lastRequestTime > activeRateLimit.timeWindow) {
           clientInfo.requestCount = 0;
@@ -75,6 +126,7 @@ export async function createServer(config: CreateServerConfig) {
       clientInfo.requestCount++;
       clientRequestCounts.set(clientIp, clientInfo);
 
+      // Forward request to worker
       const worker: Worker = roundRobin();
 
       if (!worker.isConnected()) {
@@ -92,6 +144,7 @@ export async function createServer(config: CreateServerConfig) {
 
       worker.send(JSON.stringify(payload));
 
+      // Handle worker response
       worker.on("message", (message) => {
         const reply = JSON.parse(message) as workerMessageReplyType;
         if (reply.errorCode) {
@@ -109,6 +162,9 @@ export async function createServer(config: CreateServerConfig) {
       console.log(`Master Process: Server is Running on Port: ${port} 🚀`);
     });
   } else {
+    /**
+     * Worker process logic: receives requests from master, applies rules, and forwards to upstreams.
+     */
     console.log(`Worker Process is Up with PID: ${process.pid} 🎉`);
     let config: ConfigSchemaType;
     try {
@@ -130,6 +186,7 @@ export async function createServer(config: CreateServerConfig) {
     }
 
     process.on("message", async (message: string) => {
+      // Validate and parse incoming message
       let messagevalidated;
 
       try {
@@ -149,6 +206,8 @@ export async function createServer(config: CreateServerConfig) {
         }
         return;
       }
+
+      // Find matching rule for the request URL
       const requestURL = messagevalidated.url;
       const rule = config.server.rules.find((e) => e.path === requestURL);
 
@@ -165,6 +224,7 @@ export async function createServer(config: CreateServerConfig) {
         return;
       }
 
+      // Find upstream for the rule
       const upstreamId = rule?.upstreams[0];
       if (!upstreamId) {
         const reply: workerMessageReplyType = {
@@ -193,17 +253,19 @@ export async function createServer(config: CreateServerConfig) {
         return;
       }
 
+      // Parse upstream URL
       const url = new URL(upstream?.url as string); // Parse the upstream URL
 
       console.log(`Forwarding request to ${url.href}`);
 
+      // Forward request to upstream using Node.js http.request
       const request = http.request(
         {
           hostname: url.hostname, // Extract the hostname
           port: url.port || 80, // Use the port from the URL or default to 80
           path: requestURL, // Forward the request URL
-          method: "GET", // HTTP method
-          agent: new http.Agent({ keepAlive: true }),
+          method: "GET", // HTTP method (can be extended for other methods)
+          agent: new http.Agent({ keepAlive: true }), // Keep-alive for performance
         },
         (response) => {
           let data = "";
@@ -212,6 +274,7 @@ export async function createServer(config: CreateServerConfig) {
           });
 
           response.on("end", () => {
+            // Send response data back to master process
             const reply: workerMessageReplyType = {
               data,
             };

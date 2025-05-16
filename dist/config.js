@@ -1,4 +1,14 @@
 "use strict";
+/**
+ * config.ts
+ * ---------
+ * Handles loading, parsing, and validating the proxy server configuration from YAML files.
+ *
+ * Provides utility functions to ensure configuration is loaded safely and correctly before server startup.
+ *
+ * Author: Pallav
+ * Date: 2025-05-16
+ */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -47,16 +57,39 @@ exports.validateConfig = validateConfig;
 const fs = __importStar(require("node:fs/promises"));
 const yaml_1 = require("yaml");
 const config_schema_1 = require("./config-schema");
+/**
+ * Parses a YAML config file and returns a JSON string representation.
+ * @param {string} filePath - The path to the YAML config file.
+ * @returns {Promise<string>} - A promise that resolves with the JSON string representation of the config.
+ */
 function parseYAMLConfig(filePath) {
     return __awaiter(this, void 0, void 0, function* () {
-        const configFileContent = yield fs.readFile(filePath, "utf-8");
-        const config = (0, yaml_1.parse)(configFileContent);
-        return JSON.stringify(config);
+        try {
+            const configFileContent = yield fs.readFile(filePath, "utf-8");
+            const config = (0, yaml_1.parse)(configFileContent);
+            return JSON.stringify(config);
+        }
+        catch (error) {
+            console.error("Error parsing YAML config:", error);
+            throw new Error(`Failed to parse YAML config file at ${filePath}: ${error}`);
+        }
     });
 }
+/**
+ * Validates a config string against the rootConfigSchema.
+ * @param {string} config - The config string to validate.
+ * @returns {Promise<ConfigSchemaType>} - A promise that resolves with the validated config.
+ */
 function validateConfig(config) {
     return __awaiter(this, void 0, void 0, function* () {
-        const validatedConfig = yield config_schema_1.rootConfigSchema.parseAsync(JSON.parse(config));
-        return validatedConfig;
+        try {
+            const parsedConfig = JSON.parse(config);
+            const validatedConfig = yield config_schema_1.rootConfigSchema.parseAsync(parsedConfig);
+            return validatedConfig;
+        }
+        catch (error) {
+            console.error("Error validating config:", error);
+            throw new Error(`Failed to validate config: ${error}`);
+        }
     });
 }
