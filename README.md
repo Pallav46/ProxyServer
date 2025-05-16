@@ -122,7 +122,7 @@ rateLimit:
 ## Running the Server
 
 ```bash
-pnpm start -- --config config.yaml
+pnpm start
 ```
 
 - The server will be available at `http://localhost:8080` (or your configured port).
