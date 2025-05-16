@@ -40,9 +40,31 @@ const headerSchema = z.object({
 });
 
 /**
+ * Schema for defining caching.
+ */
+const cacheSchema = z.object({
+  /**
+   * Enable or disable caching.
+   */
+  enabled: z.boolean().default(true),
+  /**
+   * Maximum number of entries in the cache.
+   */
+  maxSize: z.number().default(100),
+  /**
+   * Time in milliseconds after which a cache entry expires.
+   */
+  expirationTime: z.number().default(60000), // 1 minute in milliseconds
+});
+
+/**
  * Schema for defining rate limiting.
  */
 const rateLimitSchema = z.object({
+  /**
+   * Enable or disable rate limiting.
+   */
+  enabled: z.boolean().default(true),
   /**
    * Maximum number of requests allowed within the time window.
    */
@@ -69,6 +91,10 @@ const ruleSchema = z.object({
      * Rate limit configuration for the rule.
      */
     rateLimit: rateLimitSchema.optional(),
+    /**
+     * Cache configuration for the rule.
+     */
+    cache: cacheSchema.optional(),
 });
 
 /**
@@ -110,6 +136,10 @@ export const rootConfigSchema = z.object({
    * Global rate limit configuration.
    */
   rateLimit: rateLimitSchema.optional(),
+  /**
+   * Global cache configuration.
+   */
+  cache: cacheSchema.optional(),
 });
 
 /**

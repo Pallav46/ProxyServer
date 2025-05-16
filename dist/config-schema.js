@@ -39,9 +39,30 @@ const headerSchema = zod_1.z.object({
     value: zod_1.z.string(),
 });
 /**
+ * Schema for defining caching.
+ */
+const cacheSchema = zod_1.z.object({
+    /**
+     * Enable or disable caching.
+     */
+    enabled: zod_1.z.boolean().default(true),
+    /**
+     * Maximum number of entries in the cache.
+     */
+    maxSize: zod_1.z.number().default(100),
+    /**
+     * Time in milliseconds after which a cache entry expires.
+     */
+    expirationTime: zod_1.z.number().default(60000), // 1 minute in milliseconds
+});
+/**
  * Schema for defining rate limiting.
  */
 const rateLimitSchema = zod_1.z.object({
+    /**
+     * Enable or disable rate limiting.
+     */
+    enabled: zod_1.z.boolean().default(true),
     /**
      * Maximum number of requests allowed within the time window.
      */
@@ -67,6 +88,10 @@ const ruleSchema = zod_1.z.object({
      * Rate limit configuration for the rule.
      */
     rateLimit: rateLimitSchema.optional(),
+    /**
+     * Cache configuration for the rule.
+     */
+    cache: cacheSchema.optional(),
 });
 /**
  * Schema for defining a server.
@@ -106,4 +131,8 @@ exports.rootConfigSchema = zod_1.z.object({
      * Global rate limit configuration.
      */
     rateLimit: rateLimitSchema.optional(),
+    /**
+     * Global cache configuration.
+     */
+    cache: cacheSchema.optional(),
 });

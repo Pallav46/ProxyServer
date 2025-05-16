@@ -42,6 +42,23 @@ interface ClientInfo {
 const clientRequestCounts: Map<string, ClientInfo> = new Map();
 
 /**
+ * Interface for cache entry.
+ * @interface CacheEntry
+ * @property {string} data - Cached response data.
+ * @property {number} expirationTime - Timestamp when the cache entry expires.
+ */
+interface CacheEntry {
+  data: string;
+  expirationTime: number;
+}
+
+/**
+ * Map to store cached responses.
+ * Keyed by request URL.
+ */
+const cache: Map<string, CacheEntry> = new Map();
+
+/**
  * Interface for the createServer config.
  * @interface CreateServerConfig
  * @property {number} port - Port to listen on.
@@ -62,7 +79,18 @@ interface CreateServerConfig {
  */
 export async function createServer(config: CreateServerConfig) {
   const { workerCount, port } = config;
-  const { rateLimit } = config.config;
+  const { rateLimit: globalRateLimit, cache: globalCacheConfig } = config.config;
+
+  // Clear expired cache entries periodically
+  setInterval(() => {
+    const now = Date.now();
+    cache.forEach((entry, url) => {
+      if (entry.expirationTime <= now) {
+        cache.delete(url);
+        console.log(`Cache entry expired for ${url}`);
+      }
+    });
+  }, globalCacheConfig?.expirationTime || 60000);
 
   const WORKER_POOL: Worker[] = [];
 
@@ -99,6 +127,11 @@ export async function createServer(config: CreateServerConfig) {
       const clientIp = req.socket.remoteAddress || "127.0.0.1";
       const rule = config.config.server.rules.find((e) => e.path === req.url);
       const pathRateLimit = rule?.rateLimit;
+      const pathCacheConfig = rule?.cache;
+
+      // Determine the active rate limit and cache configuration
+      const activeRateLimit = pathRateLimit || globalRateLimit;
+      const activeCacheConfig = pathCacheConfig || globalCacheConfig;
 
       const now = Date.now();
       const clientInfo = clientRequestCounts.get(clientIp) || {
@@ -106,10 +139,8 @@ export async function createServer(config: CreateServerConfig) {
         requestCount: 0,
       };
 
-      const activeRateLimit = pathRateLimit || rateLimit;
-
       // Rate limiting logic
-      if (activeRateLimit) {
+      if (activeRateLimit?.enabled) {
         if (now - clientInfo.lastRequestTime > activeRateLimit.timeWindow) {
           clientInfo.requestCount = 0;
         }
@@ -120,11 +151,27 @@ export async function createServer(config: CreateServerConfig) {
           res.end("Too Many Requests");
           return;
         }
+
+        clientInfo.lastRequestTime = now;
+        clientInfo.requestCount++;
+        clientRequestCounts.set(clientIp, clientInfo);
       }
 
-      clientInfo.lastRequestTime = now;
-      clientInfo.requestCount++;
-      clientRequestCounts.set(clientIp, clientInfo);
+      // Check if caching is enabled
+      if (activeCacheConfig?.enabled) {
+        const cachedResponse = cache.get(req.url as string);
+
+        // Check if the response is in the cache and hasn't expired
+        if (cachedResponse && cachedResponse.expirationTime > now) {
+          console.log(`Cache hit for ${req.url}`);
+          res.statusCode = 200;
+          res.end(cachedResponse.data);
+          return;
+        } else {
+          // Remove expired entry from the cache
+          cache.delete(req.url as string);
+        }
+      }
 
       // Forward request to worker
       const worker: Worker = roundRobin();
@@ -145,15 +192,21 @@ export async function createServer(config: CreateServerConfig) {
       worker.send(JSON.stringify(payload));
 
       // Handle worker response
-      worker.on("message", (message) => {
+      worker.on("message", (message: string) => {
         const reply = JSON.parse(message) as workerMessageReplyType;
         if (reply.errorCode) {
           res.statusCode = parseInt(reply.errorCode);
           res.end(reply.error);
           return;
         } else {
+          // Store the response in the cache
+          if (activeCacheConfig?.enabled && reply.data) {
+            const expirationTime = now + (activeCacheConfig.expirationTime || 60000);
+            cache.set(req.url as string, { data: reply.data, expirationTime });
+            console.log(`Cache set for ${req.url}`);
+          }
           res.statusCode = 200;
-          res.end(reply.data);
+          res.end(reply.data || "");
         }
       });
     });

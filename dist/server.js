@@ -38,6 +38,11 @@ const server_schema_1 = require("./server-schema");
  */
 const clientRequestCounts = new Map();
 /**
+ * Map to store cached responses.
+ * Keyed by request URL.
+ */
+const cache = new Map();
+/**
  * Creates a proxy server with clustering, rate limiting, and rule-based upstream forwarding.
  *
  * @param {CreateServerConfig} config - The config for the server.
@@ -46,7 +51,17 @@ const clientRequestCounts = new Map();
 function createServer(config) {
     return __awaiter(this, void 0, void 0, function* () {
         const { workerCount, port } = config;
-        const { rateLimit } = config.config;
+        const { rateLimit: globalRateLimit, cache: globalCacheConfig } = config.config;
+        // Clear expired cache entries periodically
+        setInterval(() => {
+            const now = Date.now();
+            cache.forEach((entry, url) => {
+                if (entry.expirationTime <= now) {
+                    cache.delete(url);
+                    console.log(`Cache entry expired for ${url}`);
+                }
+            });
+        }, (globalCacheConfig === null || globalCacheConfig === void 0 ? void 0 : globalCacheConfig.expirationTime) || 60000);
         const WORKER_POOL = [];
         if (cluster_1.default.isPrimary) {
             /**
@@ -78,14 +93,17 @@ function createServer(config) {
                 const clientIp = req.socket.remoteAddress || "127.0.0.1";
                 const rule = config.config.server.rules.find((e) => e.path === req.url);
                 const pathRateLimit = rule === null || rule === void 0 ? void 0 : rule.rateLimit;
+                const pathCacheConfig = rule === null || rule === void 0 ? void 0 : rule.cache;
+                // Determine the active rate limit and cache configuration
+                const activeRateLimit = pathRateLimit || globalRateLimit;
+                const activeCacheConfig = pathCacheConfig || globalCacheConfig;
                 const now = Date.now();
                 const clientInfo = clientRequestCounts.get(clientIp) || {
                     lastRequestTime: now,
                     requestCount: 0,
                 };
-                const activeRateLimit = pathRateLimit || rateLimit;
                 // Rate limiting logic
-                if (activeRateLimit) {
+                if (activeRateLimit === null || activeRateLimit === void 0 ? void 0 : activeRateLimit.enabled) {
                     if (now - clientInfo.lastRequestTime > activeRateLimit.timeWindow) {
                         clientInfo.requestCount = 0;
                     }
@@ -95,10 +113,25 @@ function createServer(config) {
                         res.end("Too Many Requests");
                         return;
                     }
+                    clientInfo.lastRequestTime = now;
+                    clientInfo.requestCount++;
+                    clientRequestCounts.set(clientIp, clientInfo);
                 }
-                clientInfo.lastRequestTime = now;
-                clientInfo.requestCount++;
-                clientRequestCounts.set(clientIp, clientInfo);
+                // Check if caching is enabled
+                if (activeCacheConfig === null || activeCacheConfig === void 0 ? void 0 : activeCacheConfig.enabled) {
+                    const cachedResponse = cache.get(req.url);
+                    // Check if the response is in the cache and hasn't expired
+                    if (cachedResponse && cachedResponse.expirationTime > now) {
+                        console.log(`Cache hit for ${req.url}`);
+                        res.statusCode = 200;
+                        res.end(cachedResponse.data);
+                        return;
+                    }
+                    else {
+                        // Remove expired entry from the cache
+                        cache.delete(req.url);
+                    }
+                }
                 // Forward request to worker
                 const worker = roundRobin();
                 if (!worker.isConnected()) {
@@ -122,8 +155,14 @@ function createServer(config) {
                         return;
                     }
                     else {
+                        // Store the response in the cache
+                        if ((activeCacheConfig === null || activeCacheConfig === void 0 ? void 0 : activeCacheConfig.enabled) && reply.data) {
+                            const expirationTime = now + (activeCacheConfig.expirationTime || 60000);
+                            cache.set(req.url, { data: reply.data, expirationTime });
+                            console.log(`Cache set for ${req.url}`);
+                        }
                         res.statusCode = 200;
-                        res.end(reply.data);
+                        res.end(reply.data || "");
                     }
                 });
             });

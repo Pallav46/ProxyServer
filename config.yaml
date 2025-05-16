@@ -29,10 +29,16 @@ server:
       upstreams:
         - node1
         - node2
+      cache:
+        enabled: true
+        maxSize: 50
+        expirationTime: 30000
       rateLimit:
+        enabled: true
         maxRequests: 3
         timeWindow: 30000
 
 rateLimit:
+  enabled: true
   maxRequests: 5
   timeWindow: 60000
